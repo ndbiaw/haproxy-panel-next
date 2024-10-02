@@ -1,15 +1,14 @@
-FROM node:16
+FROM node:latest
 
 WORKDIR /opt
 ENV NODE_ENV production
 
 COPY package.json /opt/package.json
 
-RUN npm install --production
+RUN npm install --omit=dev
 
 COPY .env /opt/.env
 COPY . /opt
 
 RUN npm run build
-
-CMD ["npm","start"]
+RUN npx next telemetry disable

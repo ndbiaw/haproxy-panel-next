@@ -1,191 +1,155 @@
-import { useRouter } from "next/router";
-import React, { useState } from 'react';
+import { useRouter } from 'next/router';
+import React, { useState, useEffect } from 'react';
 import Head from 'next/head';
-import Link from 'next/link';
 import MapRow from '../../components/MapRow.js';
+import MapFormFields from '../../components/MapFormFields.js'; // Import the new component
 import BackButton from '../../components/BackButton.js';
 import ErrorAlert from '../../components/ErrorAlert.js';
-import ApiCall from '../../api.js';
+import SearchFilter from '../../components/SearchFilter.js';
+import * as API from '../../api.js';
+
+import countries from 'i18n-iso-countries';
+import enCountries from 'i18n-iso-countries/langs/en.json';
+countries.registerLocale(enCountries);
 
 const MapPage = (props) => {
-
 	const router = useRouter();
-
 	const { name: mapName } = router.query;
-
-	const [mapData, setMapData] = useState(props);
+	const [state, dispatch] = useState(props);
 	const [error, setError] = useState();
+	const [filter, setFilter] = useState('');
+	const changedMap = state.mapInfo?.name !== mapName;
 
-    React.useEffect(() => {
-    	if (!mapData.user) {
-    		ApiCall(`/map/${mapName}.json`, 'GET', null, setMapData, setError, null, router);
-	    }
-    }, [mapData.user, mapName, router]);
+	useEffect(() => {
+		if (!state.map || changedMap) {
+			API.getMap(mapName, dispatch, setError, router);
+		}
+	}, [state.map, mapName, router, changedMap]);
 
-	if (!mapData.user) {
+	const [editValue, setEditValue] = useState({});
+
+	const handleFieldChange = (field, newValue) => {
+		setEditValue((prev) => ({
+			...prev,
+			[field]: newValue,
+		}));
+	};
+
+	const { user, mapValueNames, mapInfo, map, csrf, showValues, mapNotes } = state || {};
+
+	useEffect(() => {
+		if (user && !user.onboarding) {
+			router.push('/onboarding');
+		}
+	}, []);
+
+	if (state.map == null || changedMap) {
 		return (
-			<>
-				Loading...
+			<div className='d-flex flex-column'>
 				{error && <ErrorAlert error={error} />}
-			</>
+				<div className='text-center mb-4'>
+					<div className='spinner-border mt-5' role='status'>
+						<span className='visually-hidden'>Loading...</span>
+					</div>
+				</div>
+			</div>
 		);
 	}
 
-	const { user, mapValueNames, mapId, map, csrf, name, showValues } = mapData;
-
 	async function addToMap(e) {
 		e.preventDefault();
-		await ApiCall(`/forms/map/${mapId.name}/add`, 'POST', JSON.stringify({ _csrf: csrf, key: e.target.key.value, value: e.target.value?.value }), null, setError, 0.5, router);
-		await ApiCall(`/map/${mapId.name}.json`, 'GET', null, setMapData, setError, null, router);
+		await API.addToMap(mapInfo.name, {
+			_csrf: csrf,
+			...editValue,
+		}, dispatch, setError, router);
+		await API.getMap(mapName, dispatch, setError, router);
 		e.target.reset();
 	}
 
-	async function deleteFromMap(e) {
-		e.preventDefault();
-		await ApiCall(`/forms/map/${mapId.name}/delete`, 'POST', JSON.stringify({ _csrf: csrf, key: e.target.key.value }), null, setError, 0.5, router);
-		await ApiCall(`/map/${mapId.name}.json`, 'GET', null, setMapData, setError, null, router);
+	async function deleteFromMap(csrf, key) {
+		await API.deleteFromMap(mapInfo.name, { _csrf: csrf, key }, dispatch, setError, router);
+		await API.getMap(mapName, dispatch, setError, router);
 	}
 
-	const mapRows = map.map((row, i) => {
-		//TODO: address prop drilling
-		return (
-			<MapRow
-				key={i}
-				row={row}
-				name={mapId.name}
-				csrf={csrf}
-				showValues={showValues}
-				mapValueNames={mapValueNames}
-				onDeleteSubmit={deleteFromMap}
-			/>
-		)
-	});
-
-
-	let formElements;
-	//TODO: env var case map names
-	switch (mapId.name) {
-		case "ddos": {
-			const mapValueOptions = Object.entries(mapValueNames)
-				.map((entry, i) => (<option key={'option'+i} value={entry[0]}>{entry[1]}</option>))
-			formElements = (
-				<>
-					<input type="hidden" name="_csrf" value={csrf} />
-					<input className="btn btn-success" type="submit" value="+" />
-					<input className="form-control mx-3" type="text" name="key" placeholder="domain/path" required />
-					<select className="form-select mx-3" name="value" required>
-						<option selected />
-						{mapValueOptions}
-					</select>
-				</>
+	const mapRows = map
+		.filter(row => {
+			const rowValue = typeof row.value === 'object' ? Object.values(row.value) : row.value;
+			return row.key.includes(filter) || rowValue.includes(filter);
+		})
+		.map((row, i) => {
+			return (
+				<MapRow
+					key={`${i}_${JSON.stringify(row)}`}
+					row={row}
+					name={mapInfo.name}
+					csrf={csrf}
+					showValues={showValues}
+					mapValueNames={mapValueNames}
+					onDeleteSubmit={deleteFromMap}
+					mapNote={mapNotes[row.key]}
+					showNote={mapInfo.showAllColumns}
+					columnKeys={mapInfo.columnKeys}
+					setError={setError}
+					user={user} // Pass user data for domain lists
+				/>
 			);
-			break;
-		}
-		case "hosts":
-		case "maintenance": {
-			const activeDomains = map.map(e => e.split(' ')[1]);
-			const inactiveDomains = user.domains.filter(d => !activeDomains.includes(d));
-			const domainSelectOptions = inactiveDomains.map((d, i) => (<option key={'option'+i} value={d}>{d}</option>));
-			formElements = (
-				<>
-					<input type="hidden" name="_csrf" value={csrf} />
-					<input className="btn btn-success" type="submit" value="+" />
-					<select className="form-select mx-3" name="key" required>
-						<option selected />
-						{domainSelectOptions}
-					</select>
-					{
-						(process.env.NEXT_PUBLIC_CUSTOM_BACKENDS_ENABLED && mapId.name === "hosts") &&
-						<input
-							className="form-control ml-2"
-							type="text"
-							name="value"
-							placeholder="backend ip:port"
-							required
-						/>
-					}
-				</>
-			);
-			break;
-		}
-		case "blocked":
-		case "whitelist":
-			formElements = (
-				<>
-					<input type="hidden" name="_csrf" value={csrf} />
-					<input className="btn btn-success" type="submit" value="+" />
-					<input className="form-control mx-3" type="text" name="key" placeholder="ip or subnet" required />
-				</>
-			);
-			break;
-	}
+		});
 
 	return (
 		<>
-
 			<Head>
-				<title>
-					{mapId.fname}
-				</title>
+				<title>{mapInfo.fname}</title>
 			</Head>
 
-			{error && <ErrorAlert error={error} />}
+			<h5 className='fw-bold'>{mapInfo.fname}:</h5>
 
-			{/* Map friendly name (same as shown on acc page) */}
-			<h5 className="fw-bold">
-				{mapId.fname}:
-			</h5>
+			<SearchFilter filter={filter} setFilter={setFilter} />
 
-			{/* Map table */}
-			<div className="table-responsive">
-				<table className="table table-bordered text-nowrap">
-					<tbody>
-
-						{/* header row */}
-						{mapRows.length > 0 && (
+			{/* Map Table */}
+			<div className='w-100 round-shadow'>
+				<form onSubmit={addToMap} className='d-flex'>
+					<table className='table text-nowrap mb-0'>
+						<tbody>
+							{/* Header row */}
 							<tr>
-								<th />
-								<th>
-									{mapId.columnNames[0]}
-								</th>
-								{showValues === true && (
-									<th>
-										{mapId.columnNames[1]}
-									</th>
-								)}
+								<th style={{ width: 0 }} />
+								<th>{mapInfo.columnNames[0]}</th>
+								{(showValues === true || mapInfo.showAllColumns === true) &&
+									mapInfo.columnNames.slice(1).map((x, mci) => (
+										<th key={`mci_${mci}`}>{x}</th>
+									))}
 							</tr>
-						)}
-						
-						{mapRows}
 
-						{/* Add new row form */}
-						<tr className="align-middle">
-							<td className="col-1 text-center" colSpan="3">
-								<form onSubmit={addToMap} className="d-flex" action={`/forms/map/${mapId.name}/add`} method="post">
-									{formElements}
-								</form>
-							</td>
-						</tr>
-						
-					</tbody>
-				</table>
+							{/* Existing Rows */}
+							{mapRows}
+
+							{/* Add New Row Form */}
+							<tr className='align-middle'>
+								<MapFormFields
+									map={map}
+									formType='add'
+									mapName={mapInfo.name}
+									mapValueNames={mapValueNames}
+									user={user}
+									editValue={editValue} // Empty object for no state (its a new row)
+									handleFieldChange={handleFieldChange} // Null makes this uncontrolled to maintain old behaviour until i cba
+								/>
+							</tr>
+						</tbody>
+					</table>
+				</form>
 			</div>
 
-			{/* back to account */}
-			<BackButton to="/account" />
-			
+			{error && <span className='mx-2'><ErrorAlert error={error} /></span>}
+
+			{/* Back Button */}
+			<BackButton to='/account' />
 		</>
 	);
-
 };
 
-export async function getServerSideProps({ req, res, query, resolvedUrl, locale, locales, defaultLocale}) {
-	return {
-		props: {
-			user: res.locals.user || null,
-			...query
-		}
-	};
+export async function getServerSideProps({ _req, res, _query, _resolvedUrl, _locale, _locales, _defaultLocale }) {
+	return { props: res.locals.data };
 }
 
 export default MapPage;

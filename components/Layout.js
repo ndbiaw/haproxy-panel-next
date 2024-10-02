@@ -1,31 +1,51 @@
 import Head from 'next/head';
 import Link from 'next/link';
+import MenuLinks from './MenuLinks';
+import { withRouter } from 'next/router';
 
-export default function Layout({ children }) {
+export default withRouter(function Layout({ children, router }) {
+	const noSidebar = ['/tos', '/login', '/register', '/changepassword', '/'].includes(router.pathname);
 	return (
 		<>
+
 			<Head>
-				<meta charSet="utf-8"/>
-				<meta name="viewport" content="width=device-width initial-scale=1"/>
-				<link rel="shortcut icon" href="/favicon.ico" />
+				<meta charSet='utf-8'/>
+				<meta name='viewport' content='width=device-width initial-scale=1'/>
+				<link rel='shortcut icon' href='/favicon.ico' />
 			</Head>
-			<div className="container col-lg-6">
-				<header className="d-flex flex-wrap align-items-center justify-content-center justify-content-md-between py-3 mb-2">
-					<ul className="nav col-4 mb-2 mb-md-0">
-						<li><Link href="/"><a className="nav-link px-2 link-dark">Home</a></Link></li>
-					</ul>
-					<div className="col-8 text-end">
-						<Link href="/login"><a className="btn btn-outline-primary me-2">Login</a></Link>
-						<Link href="/register"><a className="btn btn-primary">Register</a></Link>
+
+			<div className='row h-100 p-0 m-0'>
+
+				{!noSidebar && <div className='col-auto sidebar h-100 m-0 px-0'>
+					<div className='d-flex flex-column flex-shrink-0 p-3 h-100 overflow-auto' style={{ width: '250px' }}>
+						<MenuLinks />
 					</div>
-				</header>
-				<main>{children}</main>
+				</div>}
+
+				<div className='col-1 flex-fill m-0 px-0 h-100 overflow-auto'>
+					<div className='p-3 h-100 d-flex flex-column'>
+						{/*<span className='corner-ribbon'>Beta</span>*/}
+						<main className='mx-auto col col-12 col-xl-8'>
+							{!noSidebar && <Link href='/menu' className='btn btn-sm btn-primary mobile-btn mb-4 d-inline-block'>
+								<i className='bi-list pe-none me-2' width='16' height='16' />
+									Menu
+							</Link>}
+							{children}
+						</main>
+
+						<footer className='mt-auto text-center text-muted small'>
+							<hr />
+							<a className='pb-3 fs-xs' href='https://gitgud.io/fatchan/haproxy-panel-next/'>source</a>
+							{' '}&bull;{' '}
+							<a className='pb-3 fs-xs' target='_blank' rel='noreferrer' href='https://basedstatus.online'>status</a>
+							{' '}&bull;{' '}
+							<a className='pb-3 fs-xs' target='_blank' rel='noreferrer' href='https://basedflare.com'>basedflare.com</a>
+						</footer>
+
+					</div>
+				</div>
+
 			</div>
-			<footer className="py-3 mt-auto">
-				<p className="text-center text-muted">
-					<a href="https://gitgud.io/fatchan/haproxy-protection/">Open Source Bot Protection</a> + <a href="https://gitgud.io/fatchan/haproxy-panel-next/">Control Panel</a>
-				</p>
-			</footer>
 		</>
-	)
-}
+	);
+});

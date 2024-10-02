@@ -1,7 +1,7 @@
 export default function ErrorAlert({ error }) {
-	return (
-		<div className="alert alert-danger" role="alert">
+	return error && (
+		<div className='alert alert-danger' role='alert'>
 			{error}
 		</div>
-	)
+	);
 }

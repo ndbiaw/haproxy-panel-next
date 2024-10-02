@@ -1,29 +1,102 @@
-const url = require('url');
+import url from 'url';
+
+import dotenv from 'dotenv';
+dotenv.config({ path: '.env' });
+
+import QRCode from 'qrcode';
+
+export const createQrCodeText = async (shkeeperResponse, crypto) => {
+	const { wallet, amount } = shkeeperResponse;
+	let qrCodeURL;
+
+	switch (crypto) {
+		case 'BTC':
+			qrCodeURL = `bitcoin:${wallet}?amount=${amount}`;
+			break;
+		case 'LTC':
+			qrCodeURL = `litecoin:${wallet}?amount=${amount}`;
+			break;
+		case 'ETH':
+		case 'ETH-USDT':
+		case 'ETH-USDC':
+			qrCodeURL = `ethereum:${wallet}?value=${amount}`;
+			break;
+		case 'XMR':
+			qrCodeURL = `monero:${wallet}?tx_amount=${amount}`;
+			break;
+		default:
+			qrCodeURL = wallet;
+			break;
+	}
+
+	const qrCodeText = await QRCode.toDataURL(qrCodeURL);
+	return qrCodeText;
+};
+
+export const allowedCryptos = (process.env.NEXT_PUBLIC_ALLOWED_CRYPTOS||'')
+	.split(',')
+	.map(x => x.trim());
 
 const fMap = {
-
 	[process.env.HOSTS_MAP_NAME]: {
-		fname: 'Active Domains',
-		description: 'Domains that will be processed by the selected cluster',
+		fname: 'Backends',
+		description: 'Backend IP mappings for domains',
 		columnNames: ['Domain', 'Backend'],
 	},
 
 	[process.env.DDOS_MAP_NAME]: {
 		fname: 'Protection Rules',
-		description: 'Rules for protection mode on domains and/or paths',
-		columnNames: ['Domain/Path', 'Mode'],
+		description: 'Set protection modes on domains and/or paths',
+		columnNames: ['Domain/Path', 'Mode', 'Tor Exits Only'],
+		columnKeys: ['m', 't'],
 	},
 
-	[process.env.BLOCKED_MAP_NAME]: {
-		fname: 'Blocked IPs/Subnets',
+	[process.env.DDOS_CONFIG_MAP_NAME]: {
+		fname: 'Protection Settings',
+		description: 'Customise protection settings on a per-domain basis',
+		columnNames: [
+			'Domain/Path',
+			'Difficulty',
+			'POW Type',
+			'Expiry',
+			'Lock cookie to IP',
+		],
+		columnKeys: ['pd', 'pt', 'cex', 'cip'],
+	},
+
+	[process.env.BLOCKED_IP_MAP_NAME]: {
+		fname: 'IP Blacklist',
 		description: 'IPs/subnets that are outright blocked',
-		columnNames: ['IP/Subnet', ''],
+		columnNames: ['IP/Subnet', 'Note'],
+		showAllColumns: true,
+	},
+
+	[process.env.BLOCKED_ASN_MAP_NAME]: {
+		fname: 'ASN Blacklist',
+		description: 'ASNs that are outright blocked',
+		columnNames: ['AS Number', 'Note'],
+		showAllColumns: true,
+	},
+
+	[process.env.BLOCKED_CC_MAP_NAME]: {
+		fname: 'Country Blacklist',
+		description: 'Countries that are outright blocked',
+		columnNames: ['Country Code', 'Note'],
+		showAllColumns: true,
+	},
+
+	[process.env.BLOCKED_CN_MAP_NAME]: {
+		fname: 'Continent Blacklist',
+		description: 'Continents that are outright blocked',
+		columnNames: ['Continent Code', 'Note'],
+		showAllColumns: true,
 	},
 
 	[process.env.WHITELIST_MAP_NAME]: {
-		fname: 'Whitelisted IPs/Subnets',
+		fname: 'IP Whitelist',
 		description: 'IPs/subnets that bypass protection rules',
-		columnNames: ['IP/Subnet', ''],
+		columnNames: ['IP/Subnet', 'Note'],
+		showAllColumns: true,
 	},
 
 	[process.env.MAINTENANCE_MAP_NAME]: {
@@ -32,67 +105,91 @@ const fMap = {
 		columnNames: ['Domain', ''],
 	},
 
-	[process.env.BACKENDS_MAP_NAME]: {
-		fname: 'Domain Backend Mappings',
-		description: 'Which internal server haproxy uses for domains',
-		columnNames: ['Domain', 'Server Name'],
+	[process.env.REWRITE_MAP_NAME]: {
+		fname: 'Rewrites',
+		description: 'Rewrite domain to a different domain and/or path',
+		columnNames: ['Domain', 'Rewrite to'],
 	},
 
+	[process.env.REDIRECT_MAP_NAME]: {
+		fname: 'Redirects',
+		description: 'Redirect one domain to another, stripping path',
+		columnNames: ['Domain', 'Redirect to'],
+	},
+  // [process.env.BACKENDS_MAP_NAME]: {
+  // fname: 'Domain Backend Mappings',
+  // description: 'Which internal server haproxy uses for domains',
+  // columnNames: ['Domain', 'Server Name'],
+  // },
 };
 
-module.exports = {
+export function makeArrayIfSingle(obj) {
+	return !Array.isArray(obj) ? [obj] : obj;
+}
 
-	fMap,
+export function validClustersString(string) {
+	return !string.split(',').some((c) => {
+		const cUrl = url.parse(c);
+		return (cUrl.protocol !== 'http:' || !cUrl.hostname);
+	});
+}
 
-	makeArrayIfSingle: (obj) => !Array.isArray(obj) ? [obj] : obj,
+export function extractMap(item) {
+	const name = item.file &&
+    item.file.match(/\/etc\/haproxy\/map\/(?<name>.+).map/).groups.name;
+	if (!fMap[name]) {return null;}
+	const count = item.description &&
+    item.description.match(/(?:.+entry_cnt=(?<count>\d+)$)?/).groups.count;
+	return {
+		name,
+		count,
+		id: item.id,
+		...fMap[name],
+	};
+}
 
-	validClustersString: (string) => {
-		return !string.split(',').some(c => {
-			const cUrl = url.parse(c);
-			return (cUrl.protocol !== 'tcp:' || !cUrl.hostname)
-		});
-	},
+export function dynamicResponse(req, res, code, data) {
+	const isRedirect = code === 302;
+	if (req.headers && req.headers['content-type'] === 'application/json') {
+		return res
+			.status(isRedirect ? 200 : code)
+			.json(data);
+	}
+	if (isRedirect) {
+		return res.redirect(data.redirect);
+	}
+	return res.status(code).send(data);
+}
 
-	extractMap: (item) => {
-		const match = item.match(/(?<index>\d+) \(\/etc\/haproxy\/(?<name>.+).map\)(?:.+entry_cnt=(?<count>\d+)$)?/);
-		if (match && match.groups) {
-			return {
-				...match.groups,
-				...fMap[match.groups.name],
-			}
-		}
-	},
+//check if list includes domain of a wildcard
+export function wildcardAllowed(domain, allowedDomains) {
+	if (domain.includes('\\')) {throw new Error('Illegal wildcardAllowed');}
+	const wcRegex = new RegExp(`${domain.replace(/\*\./g, '([^ ]*\\.|^)')}$`);
+	return allowedDomains.some((d) => {
+		return wcRegex.test(d);
+	});
+}
 
-	getMapId: async (haproxy, name) => {
-		return haproxy.showMap()
-			.then(list => {
-				return list
-					.map(module.exports.extractMap)
-					.find(l => l && l.name == name);
-			});
-	},
+//check if a domain matches a wildcard
+export function wildcardMatches(domain, wildcard) {
+	if (wildcard.includes('\\')) {throw new Error('Illegal wildcardMatches');}
+	const wcRegex = new RegExp(`${wildcard.replace(/\*\./g, '^.*\\.')}$`);
+	return wcRegex.test(domain);
+}
 
-	deleteFromMap: async (haproxy, name, value) => {
-		//maybe in future, we should cache the map # or ID because they dont(afaik) change during runtime
-		const mapId = await module.exports.getMapId(haproxy, name);
-		if (!mapId) {
-			throw 'Invalid map';
-		}
-		return haproxy.delMap(mapId.index, value);
-	},
+export function getApproxSubject(storageName) {
+	let ret = storageName
+		.replaceAll('_', '.')
+		.substr(0, storageName.length - 4);
+	if (ret.startsWith('.')) {
+		ret = ret.substring(1);
+	}
+	return ret;
+}
 
-	dynamicResponse: async(req, res, code, data) => {
-		const isRedirect = code === 302;
-		if (req.headers && req.headers['content-type'] === 'application/json') {
-			return res
-				.status(isRedirect ? 200 : code)
-				.json(data);
-		}
-		if (isRedirect) {
-			return res.redirect(data.redirect);
-		}
-		//TODO: pass through app (bind to middleware) and app.render an "error" page for nojs users?
-		return res.status(code).send(data);
-	},
-
-};
+export function filterCertsByDomain(certs, allowedDomains) {
+	return certs.filter((c) => {
+		const approxSubject = getApproxSubject(c.storage_name);
+		return allowedDomains.includes(approxSubject);
+	});
+}
